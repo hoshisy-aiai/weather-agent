@@ -1,0 +1,29 @@
+name: Daily Weather Update
+
+on:
+  schedule:
+    - cron: '0 21 * * *' # 日本時間の毎朝6時に自動実行
+  workflow_dispatch: # 手動で動かすためのボタンを作る設定
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Create credentials.json
+        run: |
+          mkdir -p src/main/resources
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > src/main/resources/credentials.json
+        
+      - name: Run Application
+        run: ./mvnw spring-boot:run
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
