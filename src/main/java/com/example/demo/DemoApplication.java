@@ -82,7 +82,7 @@ public class DemoApplication {
 
             service.events().insert(calendarId, event).execute();
             System.out.println("--- 成功！カレンダーを確認してください ---");
-
+            System.exit(0);
         } catch (Exception e) {
             System.err.println("エラー: " + e.getMessage());
         }
