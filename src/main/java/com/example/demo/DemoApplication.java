@@ -25,7 +25,8 @@ import java.util.Collections;
 @SpringBootApplication
 @EnableScheduling
 public class DemoApplication {
-
+    @Value("${gemini.api.key}")
+    private String apiKey;
     public static void main(String[] args) {
         SpringApplication.run(DemoApplication.class, args);
         System.out.println("--- AIエージェント再起動完了！ ---");
@@ -41,9 +42,6 @@ public class DemoApplication {
 
     @Scheduled(cron = "0 0 15 * * *", zone = "Asia/Tokyo")
     public void executeWeatherTask() throws Exception {
-        // ✅ 修正後：外（設定ファイル）から名前を指定して受け取る状態
-        @Value("${gemini.api.key}")
-        private String apiKey;
         String calendarId = "f8dde1c135ea04b76936966936cee136189c1636245c1ba57845f815f7510f1a@group.calendar.google.com"; 
 
         try {
