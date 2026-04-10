@@ -23,7 +23,8 @@ jobs:
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > src/main/resources/credentials.json
         
       - name: Run Application
-        run: mvn spring-boot:run
+        run: mvn spring-boot:run -Dspring-boot.run.arguments="--gemini.api.key=${{ secrets.GEMINI_API_KEY }}"
+
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CALENDAR_ID: ${{ secrets.CALENDAR_ID }}

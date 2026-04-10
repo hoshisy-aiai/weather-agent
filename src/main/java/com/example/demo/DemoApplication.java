@@ -1,5 +1,6 @@
 package com.example.demo;
 
+import org.springframework.beans.factory.annotation.Value;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.calendar.Calendar;
@@ -40,7 +41,9 @@ public class DemoApplication {
 
     @Scheduled(cron = "0 0 15 * * *", zone = "Asia/Tokyo")
     public void executeWeatherTask() throws Exception {
-        String apiKey = "AIzaSyAhjF6TWtcTOtjjXTCr5117JmGbv0W9h0Y";
+        // ✅ 修正後：外（設定ファイル）から名前を指定して受け取る状態
+        @Value("${gemini.api.key}")
+        private String apiKey;
         String calendarId = "f8dde1c135ea04b76936966936cee136189c1636245c1ba57845f815f7510f1a@group.calendar.google.com"; 
 
         try {
