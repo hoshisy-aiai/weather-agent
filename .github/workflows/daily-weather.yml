@@ -21,10 +21,10 @@ jobs:
         run: |
           mkdir -p src/main/resources
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > src/main/resources/credentials.json
-        
+
       - name: Run Application
         run: mvn spring-boot:run -Dspring-boot.run.arguments="--gemini.api.key=${{ secrets.GEMINI_API_KEY }}"
-
-        env:
+        env:  # ← 「r」と「e」の縦のラインを揃えます！
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }} # これも忘れずに！
