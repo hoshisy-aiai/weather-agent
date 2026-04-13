@@ -1,24 +1,14 @@
 package com.example.demo;
 
-import org.springframework.beans.factory.annotation.Value;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.client.util.DateTime;
 import com.google.api.services.calendar.Calendar;
-import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventDateTime;
-import com.google.auth.http.HttpCredentialsAdapter;
-import com.google.auth.oauth2.GoogleCredentials;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.Bean;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.stereotype.Component;
 
 import java.util.Collections;
 
@@ -28,71 +18,64 @@ public class DemoApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(DemoApplication.class, args);
-        System.out.println("--- AIエージェント再起動完了！ ---");
+        System.out.println("--- AIエージェント起動完了！ ---");
     }
+}
 
-    @Bean
-    public CommandLineRunner testOnStart() {
-        return args -> {
-            System.out.println("【復旧テスト】カレンダー書き込みを開始します...");
-            executeWeatherTask();
-        };
-    }
+@Component
+class WeatherTask {
 
+    // 以前の @Value("${gemini.api.key}") は消し、環境変数から直接取得する形にしています
     @Scheduled(cron = "0 0 15 * * *", zone = "Asia/Tokyo")
     public void executeWeatherTask() {
-        // 修正ポイント：直接 GitHub の Secrets から読み込む
-            String apiKey = System.getenv("GEMINI_API_KEY"); 
-    
-    // ログに出して確認（最初の数文字だけ表示して安心する）
-    if (apiKey != null && apiKey.length() > 5) {
-        System.out.println("APIキーの読み込みに成功しました。");
-    } else {
-        System.out.println("エラー：APIキーが空っぽです！");
-        return; 
-    }
-    
-        String calendarId = "f8dde1c135ea04b76936966936cee136189c1636245c1ba57845f815f7510f1a@group.calendar.google.com"; 
-
         try {
-            // 日本時間を基準にする
-            java.util.TimeZone tz = java.util.TimeZone.getTimeZone("Asia/Tokyo");
-            java.util.Calendar targetDate = java.util.Calendar.getInstance(tz);
-            
-            // 1. まず「明日」の日付にする
-            targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1);
-            
-            // 2. 時間を「15時00分」に固定する
-            targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
+            String apiKey = System.getenv("GEMINI_API_KEY");
+            String calendarId = System.getenv("CALENDAR_ID");
+
+            if (apiKey == null || calendarId == null) {
+                System.err.println("エラー: 環境変数（APIキーまたはカレンダーID）が設定されていません。");
+                return;
+            }
+
+            // Google Calendar APIの準備
+            Calendar service = GoogleCalendarService.getService();
+
+            // 1. カレンダーに登録する「日付」の準備
+            java.util.Calendar targetDate = java.util.Calendar.getInstance();
+            targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1); // 明日の日付
+
+            // 2. ★ 応用編：世界時間の「午前6時」にセット（これが日本時間の15時になります）
+            targetDate.set(java.util.Calendar.HOUR_OF_DAY, 6);
             targetDate.set(java.util.Calendar.MINUTE, 0);
             targetDate.set(java.util.Calendar.SECOND, 0);
             targetDate.set(java.util.Calendar.MILLISECOND, 0);
-    
-            // 3. 終了時刻を「15時30分」にする（PCで見やすくするため）
+
+            // 3. 終了時刻（30分後）の作成
             java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
             endDate.add(java.util.Calendar.MINUTE, 30);
-    
+
+            // 4. イベントの作成
             Event event = new Event()
-                .setSummary("★テスト書き込み★ " + new java.util.Date().toString())
-                .setDescription("日本時間15:00に固定して書き込むテストです。");
-    
-            // 開始時間をセット（タイムゾーンも明示）
+                .setSummary("AIエージェント：明日の天気確認")
+                .setDescription("GitHub Actions（世界時間 06:00）経由で登録。日本時間では 15:00 です。");
+
+            // 開始時刻のセット
             EventDateTime start = new EventDateTime()
-                .setDateTime(new com.google.api.client.util.DateTime(targetDate.getTime()))
-                .setTimeZone("Asia/Tokyo");
+                .setDateTime(new DateTime(targetDate.getTime()));
             event.setStart(start);
-    
-            // 終了時間をセット
+
+            // 終了時刻のセット
             EventDateTime end = new EventDateTime()
-                .setDateTime(new com.google.api.client.util.DateTime(endDate.getTime()))
-                .setTimeZone("Asia/Tokyo");
+                .setDateTime(new DateTime(endDate.getTime()));
             event.setEnd(end);
-    
+
+            // 5. カレンダーへの書き込み実行
             service.events().insert(calendarId, event).execute();
-            System.out.println("--- 成功！カレンダーの【明日】の15:00を確認してください ---");
-    
+            System.out.println("--- 成功：日本時間の15:00（世界時間06:00）に予定を登録しました ---");
+
         } catch (Exception e) {
+            System.err.println("エラーが発生しました: " + e.getMessage());
             e.printStackTrace();
-        } 
-        // ここにあった 96-99行目の別の catch は消す！
+        }
     }
+}
