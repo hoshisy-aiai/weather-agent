@@ -23,8 +23,10 @@ jobs:
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > src/main/resources/credentials.json
 
       - name: Run Application
-        run: mvn spring-boot:run -Dspring-boot.run.arguments="--gemini.api.key=${{ secrets.GEMINI_API_KEY }}"
-        env:  # ← 「r」と「e」の縦のラインを揃えます！
+        # 余計な引数を消してシンプルに実行！
+        run: mvn spring-boot:run 
+        env:
+          # GitHubのSecretを、Javaが読み取れる「環境変数」としてセットします
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }} # これも忘れずに！
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
