@@ -2,8 +2,9 @@ name: Daily Weather Update
 
 on:
   schedule:
-    - cron: '0 21 * * *' # 日本時間の毎朝6時に自動実行
-  workflow_dispatch: # 手動で動かすためのボタンを作る設定
+    # 毎日 日本時間 14:55（世界時間 05:55）に自動起動
+    - cron: '55 5 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
