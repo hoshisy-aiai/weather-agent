@@ -93,7 +93,6 @@ public class DemoApplication {
     
         } catch (Exception e) {
             e.printStackTrace();
-        } catch (Exception e) {
-            System.err.println("エラー: " + e.getMessage());
-            System.exit(1);
-        }
+        } 
+        // ここにあった 96-99行目の別の catch は消す！
+    }
