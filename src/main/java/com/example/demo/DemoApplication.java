@@ -122,17 +122,21 @@ public class DemoApplication {
                 result.append(matcher.group(1).replace("\\n", "\n"));
             }
 
-            if (result.length() > 0) {
+if (result.length() > 0) {
                 String output = result.toString().trim();
-                // --- 強制カットロジック（改良版） ---
-                // 「参考サイト：」の行を探し、その行の終わりで完全に打ち切る
+                
+                // --- 改良版：参考サイトURLまでを確実に残すロジック ---
                 int urlIndex = output.lastIndexOf("参考サイト：");
                 if (urlIndex != -1) {
-                    int endOfLine = output.indexOf("\n", urlIndex);
-                    if (endOfLine != -1) {
-                        return output.substring(0, endOfLine).trim();
-                    }
-                    return output; // 改行がなければそのまま（URLで終わっている場合）
+                    // 「参考サイト：」が見つかったら、そこから「2行分」くらい（URLを含む範囲）を許容する
+                    // または、単純にそこから最後までを採用し、末尾の余計な空白だけ消す
+                    return output.substring(0).trim(); 
+                }
+                
+                // 保険：参考サイトが見当たらない場合でもアドバイスまでは出す
+                int adviceIndex = output.lastIndexOf("AIアドバイス：");
+                if (adviceIndex != -1) {
+                    return output.trim();
                 }
                 return output;
             } else {
