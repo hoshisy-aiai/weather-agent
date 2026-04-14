@@ -85,17 +85,49 @@ public class DemoApplication {
     }
 
     private String fetchWeatherFromGemini(String apiKey) {
-    // 1. Geminiに見せる「お手本」を詳しく書く
-    String instructions = "東京都練馬区の明日の天気を調べてください。\n" +
-                          "返答は必ず以下の形式にしてください。余計な挨拶はいりません。\n\n" +
-                          "【明日の予報（練馬区）】\n" +
-                          "・06:00：[絵文字] [天気] ([温度]℃)\n" +
-                          "（中略：21:00まで同様に）\n\n" +
-                          "AIアドバイス：[具体的なアドバイス]";
+        System.out.println("--- Gemini APIへ天気検索をリクエスト中... ---");
+        try {
+            // 1. あの「きれいな表記」を守らせるためのプロンプト（指示書）
+            String prompt = "東京都練馬区の明日の天気をGoogle検索を使って最新情報で調べてください。\n" +
+                            "回答は必ず以下のフォーマットを厳守し、余計な挨拶や説明は一切含めないでください。カレンダーにそのまま登録します。\n\n" +
+                            "【明日の予報（練馬区）】\n" +
+                            "・06:00：[絵文字] [天気] ([気温]℃)\n" +
+                            "・09:00：[絵文字] [天気] ([気温]℃)\n" +
+                            "・12:00：[絵文字] [天気] ([気温]℃)\n" +
+                            "・15:00：[絵文字] [天気] ([気温]℃)\n" +
+                            "・18:00：[絵文字] [天気] ([気温]℃)\n" +
+                            "・21:00：[絵文字] [天気] ([気温]℃)\n\n" +
+                            "AIアドバイス：[傘の必要性や服装への一言]";
 
-    // 2. この instructions（指示）をGeminiに送信する
-    // 送信されたGeminiは、検索機能（Grounding）を使って最新情報をこの形に当てはめて返してくれます。
-    
-    // ここで返ってきた「文章」が、そのままカレンダーの「説明欄」に書き込まれます！
+            // 2. Geminiに送るためのJSONデータを作成（Google検索ツールを有効化）
+            String requestBody = "{\n" +
+                    "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
+                    "  \"tools\": [{\"googleSearch\": {}}]\n" +
+                    "}";
+
+            // 3. HTTPクライアントでGemini 1.5 Flashに送信
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            // 4. 結果を受け取る
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            // 5. カレンダーAPI用にすでに入っているGsonを使って、返ってきたJSONからテキストだけを抽出
+            com.google.gson.JsonObject jsonResponse = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject();
+            
+            return jsonResponse
+                    .getAsJsonArray("candidates").get(0).getAsJsonObject()
+                    .getAsJsonObject("content")
+                    .getAsJsonArray("parts").get(0).getAsJsonObject()
+                    .get("text").getAsString();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "【エラー】天気の取得に失敗しました。\n詳細: " + e.getMessage();
+        }
     }
 }
