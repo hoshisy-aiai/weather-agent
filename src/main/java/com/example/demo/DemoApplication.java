@@ -92,7 +92,8 @@ private String fetchWeatherFromGemini(String apiKey) {
         try {            
             // プロンプトを強化：降水確率を追加し、繰り返しを厳禁
             String prompt = "東京都練馬区の明日の天気をGoogle検索で詳しく調べてください。\n" +
-                            "回答は以下のフォーマットのみを出力し、挨拶、説明、および末尾での内容の繰り返しは【絶対に】しないでください。\n\n" +
+                            "最後に必ず『参考サイト：URL』の形式で、参考にした情報のソースを1つ以上記載してください。\n" +
+                            "回答は以下のフォーマットのみを出力し、挨拶、説明、および末尾でのタイトルの繰り返し、内容の繰り返しは絶対にしないでください。\n\n" +                           
                             "【明日の予報（練馬区）】\n" +
                             "・06:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・09:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
@@ -101,6 +102,13 @@ private String fetchWeatherFromGemini(String apiKey) {
                             "・18:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・21:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n\n" +
                             "AIアドバイス：[傘の必要性や服装への一言]";
+
+            // Geminiからの回答テキストにURLが含まれていれば、
+            // カレンダー登録時の description にそのまま流し込む
+            String descriptionForCalendar = result.toString();
+
+            // もしHTMLリンクにしたい場合は、プログラム側で <a> タグに変換することも可能です
+                    descriptionForCalendar += "\n\n<a href='参考URL'>ソース元を確認</a>";
 
             String requestBody = "{\n" +
                     "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
