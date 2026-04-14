@@ -4,7 +4,7 @@ on:
   schedule:
     # 毎日 日本時間 14:55（世界時間 05:55）に自動起動
     - cron: '55 5 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行ボタンも有効
 
 jobs:
   build:
@@ -23,11 +23,16 @@ jobs:
           mkdir -p src/main/resources
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > src/main/resources/credentials.json
 
+      # 【重要】ここが「使えるモデル」をログに吐き出す新ステップです
+      - name: Check Available Gemini Models
+        run: |
+          echo "--- 利用可能なGeminiモデル一覧を取得します ---"
+          curl -s https://generativelanguage.googleapis.com/v1/models?key=${{ secrets.GEMINI_API_KEY }} | grep '"name":'
+          echo "--------------------------------------------"
+
       - name: Run Application
-        # 余計な引数を消してシンプルに実行！
         run: mvn spring-boot:run 
         env:
-          # GitHubのSecretを、Javaが読み取れる「環境変数」としてセットします
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
