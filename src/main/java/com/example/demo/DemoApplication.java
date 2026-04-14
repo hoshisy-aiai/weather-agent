@@ -83,64 +83,67 @@ public class DemoApplication {
         };
     }
 
-    private String fetchWeatherFromGemini(String apiKey) {
-        // 1. 環境変数からモデル名を取得。設定がなければ 2.5-flash を使う
+private String fetchWeatherFromGemini(String apiKey) {
         String modelName = System.getenv("GEMINI_MODEL_NAME");
         if (modelName == null || modelName.isEmpty()) {
             modelName = "gemini-2.5-flash"; 
         }
         
         try {            
-            // 2. あの「きれいな表記」を守らせるためのプロンプト（指示書）
-            String prompt = "東京都練馬区の明日の天気をGoogle検索を使って最新情報で調べてください。\n" +
-                            "回答は必ず以下のフォーマットを厳守し、余計な挨拶や説明は一切含めないでください。カレンダーにそのまま登録します。\n\n" +
+            // プロンプトを強化：降水確率を追加し、繰り返しを厳禁
+            String prompt = "東京都練馬区の明日の天気をGoogle検索で詳しく調べてください。\n" +
+                            "回答は以下のフォーマットのみを出力し、挨拶、説明、および末尾での内容の繰り返しは【絶対に】しないでください。\n\n" +
                             "【明日の予報（練馬区）】\n" +
-                            "・06:00：[絵文字] [天気] ([気温]℃)\n" +
-                            "・09:00：[絵文字] [天気] ([気温]℃)\n" +
-                            "・12:00：[絵文字] [天気] ([気温]℃)\n" +
-                            "・15:00：[絵文字] [天気] ([気温]℃)\n" +
-                            "・18:00：[絵文字] [天気] ([気温]℃)\n" +
-                            "・21:00：[絵文字] [天気] ([気温]℃)\n\n" +
+                            "・06:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
+                            "・09:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
+                            "・12:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
+                            "・15:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
+                            "・18:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
+                            "・21:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n\n" +
                             "AIアドバイス：[傘の必要性や服装への一言]";
 
-            // 3. Geminiに送るためのJSONデータを作成（Google検索ツールを有効化）
             String requestBody = "{\n" +
                     "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
                     "  \"tools\": [{\"googleSearch\": {}}]\n" +
                     "}";
 
-            // 4. HTTPクライアントで指定されたモデルに送信
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    // 先ほど成功した v1beta を維持します
                     .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
-            // 5. 結果を受け取る
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-
-            // --- ★ 修正箇所：ここからが「修正不要」の汎用パース処理 ---
             String body = response.body();
             
-            // どんなJSON構造でも、正規表現で "text": "..." の中身だけを強引に抜き出す
+            // 汎用パース：JSON構造が変わってもテキストだけを抽出
             java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
             
             StringBuilder result = new StringBuilder();
             while (matcher.find()) {
-                // Unicodeエスケープ（\n など）を復元して結合
                 result.append(matcher.group(1).replace("\\n", "\n"));
             }
 
             if (result.length() > 0) {
-                return result.toString();
+                // もしGeminiが指示を破って重複させた場合の保険として、
+                // 最初の「AIアドバイス：」以降の余計な繰り返しをカットする処理
+                String output = result.toString();
+                int lastAdviceIndex = output.lastIndexOf("AIアドバイス：");
+                if (lastAdviceIndex != -1) {
+                    // アドバイスの後の最初の改行までを保持し、それ以降（もしあれば）をカット
+                    int endOfAdvice = output.indexOf("\n", lastAdviceIndex);
+                    if (endOfAdvice != -1) {
+                        return output.substring(0, endOfAdvice).trim();
+                    }
+                }
+                return output.trim();
             } else {
-                // 万が一テキストが見つからなかった場合は、Geminiからの生のメッセージをそのまま返す
                 return "【APIエラー】応答にテキストが含まれていません:\n" + body;
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
             return "【システムエラー】天気の取得に失敗しました。\n詳細: " + e.getMessage();
         }
     }
