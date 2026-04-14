@@ -112,8 +112,7 @@ public class DemoApplication {
             // 4. HTTPクライアントで指定されたモデルに送信
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    // ★ 修正箇所：URLに modelName 変数を組み込みました！
-                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1/models/" + modelName + ":generateContent?key=" + apiKey))
+                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
