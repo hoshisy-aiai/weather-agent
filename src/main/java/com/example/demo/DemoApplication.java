@@ -36,6 +36,7 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
+                // Geminiから天気とURLを取得
                 String weatherInfo = fetchWeatherFromGemini(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -48,18 +49,16 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // TimeZoneを明示的に "Asia/Tokyo" にすることで、GitHub上でも日本時間として扱います
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-                targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1); // 明日の日付
-                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15); // 日本時間の「15時」をそのまま指定！
+                targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1);
+                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
                 targetDate.set(java.util.Calendar.SECOND, 0);
 
                 Event event = new Event()
                     .setSummary("AI天気予報：明日の練馬区")
-                    .setDescription(weatherInfo);
+                    .setDescription(weatherInfo); // ここに予報と参考URLが入ります
 
-                // Googleカレンダー側にも「これは日本時間ですよ」と教えてあげます
                 EventDateTime start = new EventDateTime()
                     .setDateTime(new DateTime(targetDate.getTime()))
                     .setTimeZone("Asia/Tokyo");
@@ -77,23 +76,20 @@ public class DemoApplication {
             } catch (Exception e) {
                 e.printStackTrace();
             }
-
-            // 仕事が終わったらプログラムを強制終了（これでGitHubのグルグルも止まります）
             System.exit(0);
         };
     }
 
-private String fetchWeatherFromGemini(String apiKey) {
+    private String fetchWeatherFromGemini(String apiKey) {
         String modelName = System.getenv("GEMINI_MODEL_NAME");
         if (modelName == null || modelName.isEmpty()) {
             modelName = "gemini-2.5-flash"; 
         }
         
         try {            
-            // プロンプトを強化：降水確率を追加し、繰り返しを厳禁
+            // プロンプト：URLの出力指示を追加
             String prompt = "東京都練馬区の明日の天気をGoogle検索で詳しく調べてください。\n" +
-                            "最後に必ず『参考サイト：URL』の形式で、参考にした情報のソースを1つ以上記載してください。\n" +
-                            "回答は以下のフォーマットのみを出力し、挨拶、説明、および末尾でのタイトルの繰り返し、内容の繰り返しは絶対にしないでください。\n\n" +                           
+                            "回答は以下のフォーマットのみを出力し、挨拶や重複は厳禁です。末尾に必ず参考サイトURLを添えてください。\n\n" +
                             "【明日の予報（練馬区）】\n" +
                             "・06:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・09:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
@@ -101,14 +97,8 @@ private String fetchWeatherFromGemini(String apiKey) {
                             "・15:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・18:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・21:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n\n" +
-                            "AIアドバイス：[傘の必要性や服装への一言]";
-
-            // Geminiからの回答テキストにURLが含まれていれば、
-            // カレンダー登録時の description にそのまま流し込む
-            String descriptionForCalendar = result.toString();
-
-            // もしHTMLリンクにしたい場合は、プログラム側で <a> タグに変換することも可能です
-                    descriptionForCalendar += "\n\n<a href='参考URL'>ソース元を確認</a>";
+                            "AIアドバイス：[内容]\n\n" +
+                            "参考サイト：[URL]";
 
             String requestBody = "{\n" +
                     "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
@@ -117,7 +107,6 @@ private String fetchWeatherFromGemini(String apiKey) {
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    // 先ほど成功した v1beta を維持します
                     .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
@@ -126,33 +115,32 @@ private String fetchWeatherFromGemini(String apiKey) {
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
             String body = response.body();
             
-            // 汎用パース：JSON構造が変わってもテキストだけを抽出
+            // 汎用パース：テキストを抽出
             java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-            
             StringBuilder result = new StringBuilder();
             while (matcher.find()) {
                 result.append(matcher.group(1).replace("\\n", "\n"));
             }
 
             if (result.length() > 0) {
-                // もしGeminiが指示を破って重複させた場合の保険として、
-                // 最初の「AIアドバイス：」以降の余計な繰り返しをカットする処理
-                String output = result.toString();
-                int lastAdviceIndex = output.lastIndexOf("AIアドバイス：");
-                if (lastAdviceIndex != -1) {
-                    // アドバイスの後の最初の改行までを保持し、それ以降（もしあれば）をカット
-                    int endOfAdvice = output.indexOf("\n", lastAdviceIndex);
-                    if (endOfAdvice != -1) {
-                        return output.substring(0, endOfAdvice).trim();
+                String output = result.toString().trim();
+                // --- 強制カットロジック（改良版） ---
+                // 「参考サイト：」の行を探し、その行の終わりで完全に打ち切る
+                int urlIndex = output.lastIndexOf("参考サイト：");
+                if (urlIndex != -1) {
+                    int endOfLine = output.indexOf("\n", urlIndex);
+                    if (endOfLine != -1) {
+                        return output.substring(0, endOfLine).trim();
                     }
+                    return output; // 改行がなければそのまま（URLで終わっている場合）
                 }
-                return output.trim();
+                return output;
             } else {
                 return "【APIエラー】応答にテキストが含まれていません:\n" + body;
             }
 
         } catch (Exception e) {
-            return "【システムエラー】天気の取得に失敗しました。\n詳細: " + e.getMessage();
+            return "【システムエラー】 " + e.getMessage();
         }
     }
 }
