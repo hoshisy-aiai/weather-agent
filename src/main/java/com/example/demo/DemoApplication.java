@@ -48,7 +48,6 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // ★ここを修正しました！
                 // TimeZoneを明示的に "Asia/Tokyo" にすることで、GitHub上でも日本時間として扱います
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1); // 明日の日付
@@ -85,9 +84,14 @@ public class DemoApplication {
     }
 
     private String fetchWeatherFromGemini(String apiKey) {
-        System.out.println("--- Gemini APIへ天気検索をリクエスト中... ---");
-        try {
-            // 1. あの「きれいな表記」を守らせるためのプロンプト（指示書）
+        // 1. 環境変数からモデル名を取得。設定がなければ 2.5-flash を使う
+        String modelName = System.getenv("GEMINI_MODEL_NAME");
+        if (modelName == null || modelName.isEmpty()) {
+            modelName = "gemini-2.5-flash"; 
+        }
+        
+        try {            
+            // 2. あの「きれいな表記」を守らせるためのプロンプト（指示書）
             String prompt = "東京都練馬区の明日の天気をGoogle検索を使って最新情報で調べてください。\n" +
                             "回答は必ず以下のフォーマットを厳守し、余計な挨拶や説明は一切含めないでください。カレンダーにそのまま登録します。\n\n" +
                             "【明日の予報（練馬区）】\n" +
@@ -99,35 +103,46 @@ public class DemoApplication {
                             "・21:00：[絵文字] [天気] ([気温]℃)\n\n" +
                             "AIアドバイス：[傘の必要性や服装への一言]";
 
-            // 2. Geminiに送るためのJSONデータを作成（Google検索ツールを有効化）
+            // 3. Geminiに送るためのJSONデータを作成（Google検索ツールを有効化）
             String requestBody = "{\n" +
                     "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
                     "  \"tools\": [{\"googleSearch\": {}}]\n" +
                     "}";
 
-            // 3. HTTPクライアントでGemini 1.5 Flashに送信
+            // 4. HTTPクライアントで指定されたモデルに送信
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" + apiKey))
+                    // ★ 修正箇所：URLに modelName 変数を組み込みました！
+                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1/models/" + modelName + ":generateContent?key=" + apiKey))
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
                     .build();
 
-            // 4. 結果を受け取る
+            // 5. 結果を受け取る
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
-            // 5. カレンダーAPI用にすでに入っているGsonを使って、返ってきたJSONからテキストだけを抽出
-            com.google.gson.JsonObject jsonResponse = com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject();
+            // --- ★ 修正箇所：ここからが「修正不要」の汎用パース処理 ---
+            String body = response.body();
             
-            return jsonResponse
-                    .getAsJsonArray("candidates").get(0).getAsJsonObject()
-                    .getAsJsonObject("content")
-                    .getAsJsonArray("parts").get(0).getAsJsonObject()
-                    .get("text").getAsString();
+            // どんなJSON構造でも、正規表現で "text": "..." の中身だけを強引に抜き出す
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+            
+            StringBuilder result = new StringBuilder();
+            while (matcher.find()) {
+                // Unicodeエスケープ（\n など）を復元して結合
+                result.append(matcher.group(1).replace("\\n", "\n"));
+            }
+
+            if (result.length() > 0) {
+                return result.toString();
+            } else {
+                // 万が一テキストが見つからなかった場合は、Geminiからの生のメッセージをそのまま返す
+                return "【APIエラー】応答にテキストが含まれていません:\n" + body;
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
-            return "【エラー】天気の取得に失敗しました。\n詳細: " + e.getMessage();
+            return "【システムエラー】天気の取得に失敗しました。\n詳細: " + e.getMessage();
         }
     }
 }
