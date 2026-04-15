@@ -50,8 +50,7 @@ public class DemoApplication {
                         .build();
 
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-                targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1);
-                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
+                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15); // 今日の15時にセット
                 targetDate.set(java.util.Calendar.MINUTE, 0);
                 targetDate.set(java.util.Calendar.SECOND, 0);
 
