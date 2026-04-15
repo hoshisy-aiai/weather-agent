@@ -122,22 +122,21 @@ public class DemoApplication {
                 result.append(matcher.group(1).replace("\\n", "\n"));
             }
 
-if (result.length() > 0) {
+            if (result.length() > 0) {
                 String output = result.toString().trim();
                 
-                // --- 改良版：参考サイトURLまでを確実に残すロジック ---
-                int urlIndex = output.lastIndexOf("参考サイト：");
-                if (urlIndex != -1) {
-                    // 「参考サイト：」が見つかったら、そこから「2行分」くらい（URLを含む範囲）を許容する
-                    // または、単純にそこから最後までを採用し、末尾の余計な空白だけ消す
-                    return output.substring(0).trim(); 
+                // --- 重複排除の最終兵器 ---
+                // 「【明日の予報」というタイトルが2回以上出現するかチェック
+                String searchTag = "【明日の予報";
+                int firstIndex = output.indexOf(searchTag);
+                int secondIndex = output.indexOf(searchTag, firstIndex + searchTag.length());
+
+                if (secondIndex != -1) {
+                    // 2回目に出現したタイトルの直前でバッサリ切り落とす
+                    output = output.substring(0, secondIndex).trim();
                 }
-                
-                // 保険：参考サイトが見当たらない場合でもアドバイスまでは出す
-                int adviceIndex = output.lastIndexOf("AIアドバイス：");
-                if (adviceIndex != -1) {
-                    return output.trim();
-                }
+
+                // さらに、URLが末尾にあることを確認して完了
                 return output;
             } else {
                 return "【APIエラー】応答にテキストが含まれていません:\n" + body;
