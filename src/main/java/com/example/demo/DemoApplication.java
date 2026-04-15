@@ -49,23 +49,26 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
+                // 修正：今日(4/15)の15時にセット
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15); // 今日の15時にセット
+                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
                 targetDate.set(java.util.Calendar.SECOND, 0);
 
                 Event event = new Event()
                     .setSummary("AI天気予報：明日の練馬区")
-                    .setDescription(weatherInfo); // ここに予報と参考URLが入ります
+                    .setDescription(weatherInfo);
 
                 EventDateTime start = new EventDateTime()
                     .setDateTime(new DateTime(targetDate.getTime()))
                     .setTimeZone("Asia/Tokyo");
                 event.setStart(start);
 
-                targetDate.add(java.util.Calendar.MINUTE, 30);
+                // 30分後の終了時間を設定
+                java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
+                endDate.add(java.util.Calendar.MINUTE, 30);
                 EventDateTime end = new EventDateTime()
-                    .setDateTime(new DateTime(targetDate.getTime()))
+                    .setDateTime(new DateTime(endDate.getTime()))
                     .setTimeZone("Asia/Tokyo");
                 event.setEnd(end);
 
@@ -82,11 +85,10 @@ public class DemoApplication {
     private String fetchWeatherFromGemini(String apiKey) {
         String modelName = System.getenv("GEMINI_MODEL_NAME");
         if (modelName == null || modelName.isEmpty()) {
-            modelName = "gemini-2.5-flash"; 
+            modelName = "gemini-2.0-flash"; // 元のモデル名を維持
         }
         
         try {            
-            // プロンプト：URLの出力指示を追加
             String prompt = "東京都練馬区の明日の天気をGoogle検索で詳しく調べてください。\n" +
                             "回答は以下のフォーマットのみを出力し、挨拶や重複は厳禁です。末尾に必ず参考サイトURLを添えてください。\n\n" +
                             "【明日の予報（練馬区）】\n" +
@@ -99,10 +101,10 @@ public class DemoApplication {
                             "AIアドバイス：[服装や傘の指示]\n\n" +
                             "参考サイト：[ここにURLを直接記載]";
 
-            String requestBody = "{\n" +
-                    "  \"contents\": [{\"parts\": [{\"text\": \"" + prompt.replace("\n", "\\n") + "\"}]}],\n" +
-                    "  \"tools\": [{\"googleSearch\": {}}]\n" +
-                    "}";
+            // JSON内の全角スペースを徹底排除
+            String requestBody = "{" +
+                    "\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n") + "\"}]" +
+                    "}],\"tools\":[{\"googleSearch\":{}}]}";
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -114,7 +116,6 @@ public class DemoApplication {
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
             String body = response.body();
             
-            // 汎用パース：テキストを抽出
             java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
             StringBuilder result = new StringBuilder();
             while (matcher.find()) {
@@ -123,19 +124,13 @@ public class DemoApplication {
 
             if (result.length() > 0) {
                 String output = result.toString().trim();
-                
-                // --- 重複排除の最終兵器 ---
-                // 「【明日の予報」というタイトルが2回以上出現するかチェック
                 String searchTag = "【明日の予報";
                 int firstIndex = output.indexOf(searchTag);
                 int secondIndex = output.indexOf(searchTag, firstIndex + searchTag.length());
 
                 if (secondIndex != -1) {
-                    // 2回目に出現したタイトルの直前でバッサリ切り落とす
                     output = output.substring(0, secondIndex).trim();
                 }
-
-                // さらに、URLが末尾にあることを確認して完了
                 return output;
             } else {
                 return "【APIエラー】応答にテキストが含まれていません:\n" + body;
