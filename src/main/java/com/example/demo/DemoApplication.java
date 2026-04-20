@@ -19,6 +19,7 @@ import org.springframework.context.annotation.Bean;
 import java.io.ByteArrayInputStream;
 import java.util.Collections;
 import java.util.TimeZone;
+import java.text.SimpleDateFormat;
 
 @SpringBootApplication
 public class DemoApplication {
@@ -36,7 +37,7 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // Geminiから天気とURLを取得
+                // Geminiから天気を取得
                 String weatherInfo = fetchWeatherFromGemini(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -49,7 +50,7 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // 修正：今日(4/15)の15時にセット
+                // 実行日の15時にカレンダーイベントを作成
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
@@ -64,7 +65,6 @@ public class DemoApplication {
                     .setTimeZone("Asia/Tokyo");
                 event.setStart(start);
 
-                // 30分後の終了時間を設定
                 java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
                 endDate.add(java.util.Calendar.MINUTE, 30);
                 EventDateTime end = new EventDateTime()
@@ -85,11 +85,18 @@ public class DemoApplication {
     private String fetchWeatherFromGemini(String apiKey) {
         String modelName = System.getenv("GEMINI_MODEL_NAME");
         if (modelName == null || modelName.isEmpty()) {
-            modelName = "gemini-2.0-flash"; // 元のモデル名を維持
+            modelName = "gemini-2.0-flash";
         }
         
-        try {            
-            String prompt = "東京都練馬区の明日の天気をGoogle検索で詳しく調べてください。\n" +
+        try {
+            // 【重要】日付のズレを防ぐため、今日と明日の日付を計算してプロンプトに入れる
+            java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日");
+            String todayStr = sdf.format(cal.getTime());
+            cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            String tomorrowStr = sdf.format(cal.getTime());
+
+            String prompt = "現在は " + todayStr + " です。明日 " + tomorrowStr + " の東京都練馬区の天気をGoogle検索で詳しく調べてください。\n" +
                             "回答は以下のフォーマットのみを出力し、挨拶や重複は厳禁です。末尾に必ず参考サイトURLを添えてください。\n\n" +
                             "【明日の予報（練馬区）】\n" +
                             "・06:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
@@ -101,10 +108,7 @@ public class DemoApplication {
                             "AIアドバイス：[服装や傘の指示]\n\n" +
                             "参考サイト：[ここにURLを直接記載]";
 
-            // JSON内の全角スペースを徹底排除
-            String requestBody = "{" +
-                    "\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n") + "\"}]" +
-                    "}],\"tools\":[{\"googleSearch\":{}}]}";
+            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -124,10 +128,10 @@ public class DemoApplication {
 
             if (result.length() > 0) {
                 String output = result.toString().trim();
+                // 重複出力をカットするロジック（ユーザーさんのコードを維持）
                 String searchTag = "【明日の予報";
                 int firstIndex = output.indexOf(searchTag);
                 int secondIndex = output.indexOf(searchTag, firstIndex + searchTag.length());
-
                 if (secondIndex != -1) {
                     output = output.substring(0, secondIndex).trim();
                 }
