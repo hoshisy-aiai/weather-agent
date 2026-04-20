@@ -37,8 +37,8 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // Geminiから天気を取得
-                String weatherInfo = fetchWeatherFromGemini(apiKey);
+                // ★改良：自動切り替え機能付きのメソッドを呼び出す
+                String weatherInfo = fetchWeatherWithFallback(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
                         new ByteArrayInputStream(credentialsJson.getBytes()))
@@ -50,7 +50,6 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // 実行日の15時にカレンダーイベントを作成
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
@@ -73,7 +72,7 @@ public class DemoApplication {
                 event.setEnd(end);
 
                 service.events().insert(calendarId, event).execute();
-                System.out.println("--- 成功：日本時間15時に登録しました ---");
+                System.out.println("--- 成功：カレンダーに登録しました ---");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -82,20 +81,35 @@ public class DemoApplication {
         };
     }
 
-    private String fetchWeatherFromGemini(String apiKey) {
-        String modelName = System.getenv("GEMINI_MODEL_NAME");
-        if (modelName == null || modelName.isEmpty()) {
-            modelName = "gemini-2.0-flash";
+    // ★新設：モデルを順番に試す「フォールバック」ロジック
+    private String fetchWeatherWithFallback(String apiKey) {
+        // 試行するモデルの優先順位リスト
+        String[] models = {"gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"};
+        String lastError = "";
+
+        for (String modelName : models) {
+            System.out.println("モデル " + modelName + " で取得を試みます...");
+            String result = callGeminiApi(modelName, apiKey);
+            
+            // エラー（429など）が含まれていなければ、成功として結果を返す
+            if (!result.startsWith("【APIエラー】") && !result.startsWith("【システムエラー】")) {
+                return result;
+            }
+            lastError = result;
+            System.out.println("警告: " + modelName + " が失敗しました。次のモデルを試します。");
         }
-        
+        return "【全モデル失敗】最後に発生したエラー:\n" + lastError;
+    }
+
+    private String callGeminiApi(String modelName, String apiKey) {
         try {
-            // 【重要】日付のズレを防ぐため、今日と明日の日付を計算してプロンプトに入れる
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日");
             String todayStr = sdf.format(cal.getTime());
             cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
             String tomorrowStr = sdf.format(cal.getTime());
 
+            // ユーザーさんの指定した詳細なプロンプト
             String prompt = "現在は " + todayStr + " です。明日 " + tomorrowStr + " の東京都練馬区の天気をGoogle検索で詳しく調べてください。\n" +
                             "回答は以下のフォーマットのみを出力し、挨拶や重複は厳禁です。末尾に必ず参考サイトURLを添えてください。\n\n" +
                             "【明日の予報（練馬区）】\n" +
@@ -106,7 +120,7 @@ public class DemoApplication {
                             "・18:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
                             "・21:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n\n" +
                             "AIアドバイス：[服装や傘の指示]\n\n" +
-                            "参考サイト：[ここにURLを直接記載]";
+                            "参考サイト：[URL]";
 
             String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
 
@@ -118,17 +132,22 @@ public class DemoApplication {
                     .build();
 
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-            String body = response.body();
             
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
-            StringBuilder result = new StringBuilder();
-            while (matcher.find()) {
-                result.append(matcher.group(1).replace("\\n", "\n"));
+            // HTTPステータスが200（成功）でない場合はエラーとして返す
+            if (response.statusCode() != 200) {
+                return "【APIエラー】ステータスコード: " + response.statusCode() + "\n" + response.body();
             }
 
-            if (result.length() > 0) {
-                String output = result.toString().trim();
-                // 重複出力をカットするロジック（ユーザーさんのコードを維持）
+            String body = response.body();
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+            StringBuilder sb = new StringBuilder();
+            while (matcher.find()) {
+                sb.append(matcher.group(1).replace("\\n", "\n"));
+            }
+
+            if (sb.length() > 0) {
+                String output = sb.toString().trim();
+                // 重複カットのロジック
                 String searchTag = "【明日の予報";
                 int firstIndex = output.indexOf(searchTag);
                 int secondIndex = output.indexOf(searchTag, firstIndex + searchTag.length());
