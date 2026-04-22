@@ -82,25 +82,27 @@ public class DemoApplication {
     }
 
     // ★新設：モデルを順番に試す「フォールバック」ロジック
-    private String fetchWeatherWithFallback(String apiKey) {
-        // 試行するモデルの優先順位リスト
-        String[] models = {"gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"};
-        String lastError = "";
+private String fetchWeatherWithFallback(String apiKey) {
+        // 確実に存在する安定したモデルのリスト
+        String[] models = {"gemini-2.0-flash", "gemini-1.5-flash"};
+        StringBuilder errorLog = new StringBuilder();
 
         for (String modelName : models) {
             System.out.println("モデル " + modelName + " で取得を試みます...");
             String result = callGeminiApi(modelName, apiKey);
             
-            // エラー（429など）が含まれていなければ、成功として結果を返す
+            // 成功（エラーメッセージで始まらない場合）は結果を返す
             if (!result.startsWith("【APIエラー】") && !result.startsWith("【システムエラー】")) {
                 return result;
             }
-            lastError = result;
-            System.out.println("警告: " + modelName + " が失敗しました。次のモデルを試します。");
+            
+            // 失敗した場合はログに記録して次へ
+            errorLog.append("・").append(modelName).append(": ").append(result).append("\n");
         }
-        return "【全モデル失敗】最後に発生したエラー:\n" + lastError;
+        
+        return "【全モデル制限中】本日の無料枠を使い切った可能性があります。明日までお待ちください。\n\n詳細ログ:\n" + errorLog.toString();
     }
-
+    
     private String callGeminiApi(String modelName, String apiKey) {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
