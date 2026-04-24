@@ -39,7 +39,7 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // モデルを切り替えながら取得を試みる
+                // モデルのフォールバックは維持（エラー対策のため）
                 String weatherInfo = fetchWeatherWithFallback(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -77,7 +77,6 @@ public class DemoApplication {
                 System.out.println("--- 成功：カレンダーに登録しました ---");
 
             } catch (Exception e) {
-                System.err.println("致命的エラー: " + e.getMessage());
                 e.printStackTrace();
             }
             System.exit(0);
@@ -85,43 +84,35 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithFallback(String apiKey) {
-        String[] models = {"gemini-2.0-flash", "gemini-1.5-flash"};
-        StringBuilder errorLog = new StringBuilder();
-
+        // 現時点で最も安定しているモデルを指定
+        String[] models = {"gemini-1.5-flash", "gemini-1.5-pro"};
         for (String modelName : models) {
-            System.out.println("モデル " + modelName + " で試行中...");
             String result = callGeminiApi(modelName, apiKey);
-            
-            if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
-                return result;
-            }
-            errorLog.append(modelName).append(": ").append(result).append("\n");
+            if (!result.contains("【APIエラー】")) return result;
         }
-        return "【全モデル制限中】明日またお試しください。\nログ:\n" + errorLog.toString();
+        return "【全モデル制限中】明日またお試しください。";
     }
 
     private String callGeminiApi(String modelName, String apiKey) {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日");
-            String todayStr = sdf.format(cal.getTime());
-            cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
-            String tomorrowStr = sdf.format(cal.getTime());
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
+            String currentTime = sdf.format(cal.getTime()); // 現在時刻（14:55頃）を取得
 
-            // プロンプト内の引用符や改行を安全に処理
-            String prompt = "現在は " + todayStr + " です。明日 " + tomorrowStr + " の東京都練馬区の天気を詳しく調べてください。" +
+            // プロンプトを「14:55時点の予報」を意識するように改良
+            String prompt = "現在は " + currentTime + " です。この直近の検索データに基づき、明日（本日より翌日）の東京都練馬区の天気を答えてください。" +
+                            "特に、現時点（14:55）で発表されている最新の予報を反映させてください。" +
                             "回答は以下の形式のみ、1回だけ出力してください。" +
                             "【明日の予報(練馬区)】" +
-                            "・06:00: [天気]" +
-                            "・09:00: [天気]" +
-                            "・12:00: [天気]" +
-                            "・15:00: [天気]" +
-                            "・18:00: [天気]" +
-                            "・21:00: [天気]" +
-                            "AIアドバイス: [指示]" +
+                            "・06:00: [天気] (気温/降水確率)" +
+                            "・09:00: [天気] (気温/降水確率)" +
+                            "・12:00: [天気] (気温/降水確率)" +
+                            "・15:00: [天気] (気温/降水確率)" +
+                            "・18:00: [天気] (気温/降水確率)" +
+                            "・21:00: [天気] (気温/降水確率)" +
+                            "AIアドバイス: [14:55時点の最新情報を踏まえた指示]" +
                             "参考サイト: [URL]";
 
-            // JSONとして壊れないようにエスケープ処理
             String safePrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n");
             String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + safePrompt + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
 
@@ -134,31 +125,23 @@ public class DemoApplication {
 
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
             
-            if (response.statusCode() != 200) {
-                return "【APIエラー】ステータス: " + response.statusCode();
-            }
+            if (response.statusCode() != 200) return "【APIエラー】" + response.statusCode();
 
-            String body = response.body();
-            // テキスト抽出の正規表現を強化（より広範囲にマッチさせる）
-            Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"(.+?)\"(?:\\s*[,}]|\\s*$)");
-            Matcher matcher = pattern.matcher(body);
+            Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"(.+?)\"");
+            Matcher matcher = pattern.matcher(response.body());
             StringBuilder sb = new StringBuilder();
             while (matcher.find()) {
-                String text = matcher.group(1).replace("\\n", "\n").replace("\\\"", "\"");
-                sb.append(text);
+                sb.append(matcher.group(1).replace("\\n", "\n").replace("\\\"", "\""));
             }
 
             String output = sb.toString().trim();
-            // 重複回答カットの安全な実装
-            String tag = "【明日の予報";
-            int first = output.indexOf(tag);
+            // 重複カット
+            int first = output.indexOf("【明日の予報");
             if (first != -1) {
-                int second = output.indexOf(tag, first + tag.length());
-                if (second != -1) {
-                    output = output.substring(0, second).trim();
-                }
+                int second = output.indexOf("【明日の予報", first + 7);
+                if (second != -1) output = output.substring(0, second).trim();
             }
-            return output.isEmpty() ? "【APIエラー】解析失敗" : output;
+            return output;
 
         } catch (Exception e) {
             return "【システムエラー】 " + e.getMessage();
