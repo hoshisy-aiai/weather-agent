@@ -33,7 +33,7 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- 改良版AIエージェント起動 ---");
+            System.out.println("--- 超改良版AIエージェント起動 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
@@ -41,8 +41,9 @@ public class DemoApplication {
 
                 String weatherInfo = fetchWeatherWithBruteForce(apiKey);
 
+                // AIが全滅した場合は、カレンダーを汚さない
                 if (weatherInfo.equals("【制限中】")) {
-                    System.err.println("AIが応答しませんでした。カレンダー登録を中止します。");
+                    System.err.println("AIが全モデルで制限中だったため、カレンダー登録をスキップしました。");
                     System.exit(0);
                 }
 
@@ -59,7 +60,6 @@ public class DemoApplication {
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
-                targetDate.set(java.util.Calendar.SECOND, 0);
 
                 Event event = new Event()
                     .setSummary("AI天気予報：明日の練馬区")
@@ -85,7 +85,7 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithBruteForce(String apiKey) {
-        // 利用可能リストに基づいた最新モデル
+        // あなたの承認済みリスト
         String[] models = {"gemini-2.5-flash", "gemini-2.0-flash"};
         
         for (String modelName : models) {
@@ -105,24 +105,20 @@ public class DemoApplication {
 
     private String callGeminiApi(String modelName, String apiKey) {
         try {
-            // 現在時刻の取得
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 HH:mm").format(cal.getTime());
-
-            // ★改善①：明日の日付と曜日をJava側で正確に計算
             java.util.Calendar tomorrow = (java.util.Calendar) cal.clone();
             tomorrow.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            
+            // 正確な日付と曜日を計算
             String[] weekDays = {"日", "月", "火", "水", "木", "金", "土"};
             String tomorrowDateStr = new SimpleDateFormat("M月d日").format(tomorrow.getTime());
             String tomorrowDayOfWeek = weekDays[tomorrow.get(java.util.Calendar.DAY_OF_WEEK) - 1];
+            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 14:55").format(cal.getTime());
 
-            // AIへの指示（プロンプト）
-            String prompt = "現在は " + currentTime + " です。最新の検索データを使用し、明日 " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") の東京都練馬区の天気を回答してください。\n" +
-                            "【重要ルール】\n" +
-                            "1. 曜日は必ず (" + tomorrowDayOfWeek + ") とすること。\n" +
-                            "2. 回答は以下の形式で「1回だけ」出力し、絶対に繰り返さないこと。\n" +
-                            "3. 余計な挨拶や重複したアドバイスは禁止。\n\n" +
-                            "形式：\n" +
+            // プロンプトを極限まで厳しく！
+            String prompt = "【最重要：明日の日付と曜日は " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") です。絶対に間違えないでください】\n" +
+                            "現在は " + currentTime + " です。Google検索を使い、明日 " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") の東京都練馬区の天気を回答してください。\n" +
+                            "以下の形式で「1回だけ」出力し、回答を絶対に繰り返さないこと。\n\n" +
                             "【明日の予報(練馬区)】【14:55時点】\n" +
                             "・06:00: [天気] (気温/降水確率)\n" +
                             "・09:00: [天気] (気温/降水確率)\n" +
@@ -130,7 +126,7 @@ public class DemoApplication {
                             "・15:00: [天気] (気温/降水確率)\n" +
                             "・18:00: [天気] (気温/降水確率)\n" +
                             "・21:00: [天気] (気温/降水確率)\n\n" +
-                            "AIアドバイス: [最新状況を踏まえた服装の指示を1つだけ]\n" +
+                            "AIアドバイス: [服装のアドバイスを1文で]\n" +
                             "参考サイト: tenki.jp";
 
             String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n").replace("\"", "\\\"") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
@@ -154,23 +150,12 @@ public class DemoApplication {
 
             String output = sb.toString().trim();
 
-            // ★改善②・③：もしAIが重複して出力してしまった場合の「お掃除」処理
-            // 最初に見つけた【明日の予報】の位置を探す
-            int firstIdx = output.indexOf("【明日の予報");
-            if (firstIdx != -1) {
-                // 2つ目の【明日の予報】がもしあれば、そこから先を消す
-                int secondIdx = output.indexOf("【明日の予報", firstIdx + 5);
-                if (secondIdx != -1) {
-                    output = output.substring(0, secondIdx).trim();
-                }
+            // ★物理カット：最初の「tenki.jp」の直後で文字をすべて切り捨てる
+            int cutPoint = output.indexOf("tenki.jp");
+            if (cutPoint != -1) {
+                output = output.substring(0, cutPoint + 8).trim();
             }
             
-            // 参考サイトが2回出てくる問題も、最後の「tenki.jp」の後に余計なものがあれば削る
-            int lastSiteIdx = output.lastIndexOf("tenki.jp");
-            if (lastSiteIdx != -1) {
-                output = output.substring(0, lastSiteIdx + 8).trim();
-            }
-
             return output;
 
         } catch (Exception e) {
