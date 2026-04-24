@@ -83,12 +83,32 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithFallback(String apiKey) {
-        // ★ここが原因でした！「-latest」をつけてフルネームの正式名称で呼びます
-        String[] models = {"gemini-1.5-flash-latest", "gemini-1.5-pro-latest"};
+        String[] models = {"gemini-1.5-flash", "gemini-1.5-pro"};
+        int maxRetries = 3; // ★画期的な新機能：各モデル最大3回まで粘る！
+
         for (String modelName : models) {
-            String result = callGeminiApi(modelName, apiKey);
-            if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
-                return result;
+            for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                System.out.println("モデル " + modelName + " にアタック中... (" + attempt + "回目)");
+                String result = callGeminiApi(modelName, apiKey);
+
+                // エラーがなければ大成功！すぐに結果を返す
+                if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
+                    return result;
+                }
+
+                // 3回目（最後）もダメだったら、次のモデルへ行く
+                if (attempt == maxRetries) {
+                    System.out.println(modelName + " は諦めます...");
+                    break;
+                }
+
+                // 20秒待ってから再チャレンジ（受付の行列が空くのを待つ）
+                System.out.println("AIが混雑中！20秒待機して再チャレンジします...");
+                try {
+                    Thread.sleep(20000); // 20000ミリ秒 ＝ 20秒
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
         }
         return "【全モデル制限中】AIが大行列で大忙しです。時間をあけてお試しください。";
@@ -98,19 +118,19 @@ public class DemoApplication {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
-            String currentTime = sdf.format(cal.getTime()); // 現在の時間を取得
+            String currentTime = sdf.format(cal.getTime());
 
             String prompt = "現在は " + currentTime + " です。この直近の検索データに基づき、明日（本日より翌日）の東京都練馬区の天気を答えてください。" +
                             "特に、現時点（" + currentTime + "）で発表されている最新の予報を反映させてください。" +
                             "回答は以下の形式のみ、1回だけ出力してください。" +
-                            "【明日の予報(練馬区)】" +
-                            "・06:00: [天気] (気温/降水確率)" +
-                            "・09:00: [天気] (気温/降水確率)" +
-                            "・12:00: [天気] (気温/降水確率)" +
-                            "・15:00: [天気] (気温/降水確率)" +
-                            "・18:00: [天気] (気温/降水確率)" +
-                            "・21:00: [天気] (気温/降水確率)" +
-                            "AIアドバイス: [" + currentTime + "時点の最新情報を踏まえた指示]" +
+                            "【明日の予報(練馬区)】\n" +
+                            "・06:00: [天気] (気温/降水確率)\n" +
+                            "・09:00: [天気] (気温/降水確率)\n" +
+                            "・12:00: [天気] (気温/降水確率)\n" +
+                            "・15:00: [天気] (気温/降水確率)\n" +
+                            "・18:00: [天気] (気温/降水確率)\n" +
+                            "・21:00: [天気] (気温/降水確率)\n" +
+                            "AIアドバイス: [" + currentTime + "時点の最新情報を踏まえた指示]\n" +
                             "参考サイト: [URL]";
 
             String safePrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n");
