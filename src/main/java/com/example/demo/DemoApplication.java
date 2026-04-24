@@ -33,13 +33,20 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- AIエージェント起動 ---");
+            System.out.println("--- 粘り強いAIエージェント起動 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                String weatherInfo = fetchWeatherWithFallback(apiKey);
+                // 1. AIに天気を聞く（承認済みリストのモデルでリトライを繰り返す）
+                String weatherInfo = fetchWeatherWithBruteForce(apiKey);
+
+                // 2. もしAIが全滅していたら、カレンダーには書かずに終了する（ガード機能）
+                if (weatherInfo.equals("【制限中】")) {
+                    System.err.println("AIが応答しませんでした。カレンダーへの登録を中止します。");
+                    System.exit(0);
+                }
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
                         new ByteArrayInputStream(credentialsJson.getBytes()))
@@ -51,6 +58,7 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
+                // 15:00の予定として登録
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
@@ -67,10 +75,7 @@ public class DemoApplication {
 
                 java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
                 endDate.add(java.util.Calendar.MINUTE, 30);
-                EventDateTime end = new EventDateTime()
-                    .setDateTime(new DateTime(endDate.getTime()))
-                    .setTimeZone("Asia/Tokyo");
-                event.setEnd(end);
+                event.setEnd(new EventDateTime().setDateTime(new DateTime(endDate.getTime())).setTimeZone("Asia/Tokyo"));
 
                 service.events().insert(calendarId, event).execute();
                 System.out.println("--- 成功：カレンダーに登録しました ---");
@@ -82,59 +87,46 @@ public class DemoApplication {
         };
     }
 
-    private String fetchWeatherWithFallback(String apiKey) {
-        String[] models = {"gemini-1.5-flash", "gemini-1.5-pro"};
-        int maxRetries = 3; // ★画期的な新機能：各モデル最大3回まで粘る！
-
+    private String fetchWeatherWithBruteForce(String apiKey) {
+        // ★ご提示いただいた「利用可能リスト」に基づくモデル名
+        String[] models = {
+            "gemini-2.5-flash",
+            "gemini-2.0-flash"
+        };
+        
         for (String modelName : models) {
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                System.out.println("モデル " + modelName + " にアタック中... (" + attempt + "回目)");
+            for (int i = 1; i <= 3; i++) {
+                System.out.println(modelName + " にアタック中... (" + i + "回目)");
                 String result = callGeminiApi(modelName, apiKey);
 
-                // エラーがなければ大成功！すぐに結果を返す
+                // 成功判定（APIエラーが含まれていなければOK）
                 if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
                     return result;
                 }
 
-                // 3回目（最後）もダメだったら、次のモデルへ行く
-                if (attempt == maxRetries) {
-                    System.out.println(modelName + " は諦めます...");
-                    break;
-                }
-
-                // 20秒待ってから再チャレンジ（受付の行列が空くのを待つ）
-                System.out.println("AIが混雑中！20秒待機して再チャレンジします...");
-                try {
-                    Thread.sleep(20000); // 20000ミリ秒 ＝ 20秒
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+                // 2回目以降は待ち時間を長く（60秒）して、制限解除を待つ
+                int waitTime = (i == 1) ? 20000 : 60000; 
+                System.out.println("混雑中... " + (waitTime/1000) + "秒待機して再試行します。");
+                try { Thread.sleep(waitTime); } catch (InterruptedException e) {}
             }
         }
-        return "【全モデル制限中】AIが大行列で大忙しです。時間をあけてお試しください。";
+        return "【制限中】";
     }
 
     private String callGeminiApi(String modelName, String apiKey) {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
-            String currentTime = sdf.format(cal.getTime());
+            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 14:55").format(cal.getTime());
 
-            String prompt = "現在は " + currentTime + " です。この直近の検索データに基づき、明日（本日より翌日）の東京都練馬区の天気を答えてください。" +
-                            "特に、現時点（" + currentTime + "）で発表されている最新の予報を反映させてください。" +
-                            "回答は以下の形式のみ、1回だけ出力してください。" +
-                            "【明日の予報(練馬区)】\n" +
-                            "・06:00: [天気] (気温/降水確率)\n" +
-                            "・09:00: [天気] (気温/降水確率)\n" +
-                            "・12:00: [天気] (気温/降水確率)\n" +
-                            "・15:00: [天気] (気温/降水確率)\n" +
-                            "・18:00: [天気] (気温/降水確率)\n" +
+            String prompt = "現在は " + currentTime + " です。最新の検索を行い、明日（翌日）の東京都練馬区の天気を答えてください。" +
+                            "必ず【14:55時点】の最新情報を反映すること。" +
+                            "回答形式：\n【明日の予報(練馬区)】\n・06:00: [天気] (気温/降水確率)\n" +
+                            "・09:00: [天気] (気温/降水確率)\n・12:00: [天気] (気温/降水確率)\n" +
+                            "・15:00: [天気] (気温/降水確率)\n・18:00: [天気] (気温/降p水確率)\n" +
                             "・21:00: [天気] (気温/降水確率)\n" +
-                            "AIアドバイス: [" + currentTime + "時点の最新情報を踏まえた指示]\n" +
-                            "参考サイト: [URL]";
+                            "AIアドバイス: [14:55時点の最新情報を踏まえたアドバイス]\n参考サイト: [URL]";
 
-            String safePrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n");
-            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + safePrompt + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
+            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n").replace("\"", "\\\"") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -144,7 +136,6 @@ public class DemoApplication {
                     .build();
 
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
-            
             if (response.statusCode() != 200) return "【APIエラー】" + response.statusCode();
 
             Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"(.+?)\"");
@@ -153,17 +144,10 @@ public class DemoApplication {
             while (matcher.find()) {
                 sb.append(matcher.group(1).replace("\\n", "\n").replace("\\\"", "\""));
             }
-
-            String output = sb.toString().trim();
-            int first = output.indexOf("【明日の予報");
-            if (first != -1) {
-                int second = output.indexOf("【明日の予報", first + 7);
-                if (second != -1) output = output.substring(0, second).trim();
-            }
-            return output;
+            return sb.toString().trim();
 
         } catch (Exception e) {
-            return "【システムエラー】 " + e.getMessage();
+            return "【システムエラー】";
         }
     }
 }
