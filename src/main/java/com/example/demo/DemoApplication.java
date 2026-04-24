@@ -20,6 +20,8 @@ import java.io.ByteArrayInputStream;
 import java.util.Collections;
 import java.util.TimeZone;
 import java.text.SimpleDateFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @SpringBootApplication
 public class DemoApplication {
@@ -37,7 +39,7 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // ★改良：自動切り替え機能付きのメソッドを呼び出す
+                // モデルを切り替えながら取得を試みる
                 String weatherInfo = fetchWeatherWithFallback(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -75,34 +77,29 @@ public class DemoApplication {
                 System.out.println("--- 成功：カレンダーに登録しました ---");
 
             } catch (Exception e) {
+                System.err.println("致命的エラー: " + e.getMessage());
                 e.printStackTrace();
             }
             System.exit(0);
         };
     }
 
-    // ★新設：モデルを順番に試す「フォールバック」ロジック
-private String fetchWeatherWithFallback(String apiKey) {
-        // 確実に存在する安定したモデルのリスト
+    private String fetchWeatherWithFallback(String apiKey) {
         String[] models = {"gemini-2.0-flash", "gemini-1.5-flash"};
         StringBuilder errorLog = new StringBuilder();
 
         for (String modelName : models) {
-            System.out.println("モデル " + modelName + " で取得を試みます...");
+            System.out.println("モデル " + modelName + " で試行中...");
             String result = callGeminiApi(modelName, apiKey);
             
-            // 成功（エラーメッセージで始まらない場合）は結果を返す
-            if (!result.startsWith("【APIエラー】") && !result.startsWith("【システムエラー】")) {
+            if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
                 return result;
             }
-            
-            // 失敗した場合はログに記録して次へ
-            errorLog.append("・").append(modelName).append(": ").append(result).append("\n");
+            errorLog.append(modelName).append(": ").append(result).append("\n");
         }
-        
-        return "【全モデル制限中】本日の無料枠を使い切った可能性があります。明日までお待ちください。\n\n詳細ログ:\n" + errorLog.toString();
+        return "【全モデル制限中】明日またお試しください。\nログ:\n" + errorLog.toString();
     }
-    
+
     private String callGeminiApi(String modelName, String apiKey) {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
@@ -111,20 +108,22 @@ private String fetchWeatherWithFallback(String apiKey) {
             cal.add(java.util.Calendar.DAY_OF_MONTH, 1);
             String tomorrowStr = sdf.format(cal.getTime());
 
-            // ユーザーさんの指定した詳細なプロンプト
-            String prompt = "現在は " + todayStr + " です。明日 " + tomorrowStr + " の東京都練馬区の天気をGoogle検索で詳しく調べてください。\n" +
-                            "回答は以下のフォーマットのみを出力し、挨拶や重複は厳禁です。末尾に必ず参考サイトURLを添えてください。\n\n" +
-                            "【明日の予報（練馬区）】\n" +
-                            "・06:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
-                            "・09:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
-                            "・12:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
-                            "・15:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
-                            "・18:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n" +
-                            "・21:00：[絵文字] [天気] ([気温]℃ / 降水[確率]%)\n\n" +
-                            "AIアドバイス：[服装や傘の指示]\n\n" +
-                            "参考サイト：[URL]";
+            // プロンプト内の引用符や改行を安全に処理
+            String prompt = "現在は " + todayStr + " です。明日 " + tomorrowStr + " の東京都練馬区の天気を詳しく調べてください。" +
+                            "回答は以下の形式のみ、1回だけ出力してください。" +
+                            "【明日の予報(練馬区)】" +
+                            "・06:00: [天気]" +
+                            "・09:00: [天気]" +
+                            "・12:00: [天気]" +
+                            "・15:00: [天気]" +
+                            "・18:00: [天気]" +
+                            "・21:00: [天気]" +
+                            "AIアドバイス: [指示]" +
+                            "参考サイト: [URL]";
 
-            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
+            // JSONとして壊れないようにエスケープ処理
+            String safePrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n");
+            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + safePrompt + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -135,31 +134,31 @@ private String fetchWeatherWithFallback(String apiKey) {
 
             java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
             
-            // HTTPステータスが200（成功）でない場合はエラーとして返す
             if (response.statusCode() != 200) {
-                return "【APIエラー】ステータスコード: " + response.statusCode() + "\n" + response.body();
+                return "【APIエラー】ステータス: " + response.statusCode();
             }
 
             String body = response.body();
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"text\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
+            // テキスト抽出の正規表現を強化（より広範囲にマッチさせる）
+            Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"(.+?)\"(?:\\s*[,}]|\\s*$)");
+            Matcher matcher = pattern.matcher(body);
             StringBuilder sb = new StringBuilder();
             while (matcher.find()) {
-                sb.append(matcher.group(1).replace("\\n", "\n"));
+                String text = matcher.group(1).replace("\\n", "\n").replace("\\\"", "\"");
+                sb.append(text);
             }
 
-            if (sb.length() > 0) {
-                String output = sb.toString().trim();
-                // 重複カットのロジック
-                String searchTag = "【明日の予報";
-                int firstIndex = output.indexOf(searchTag);
-                int secondIndex = output.indexOf(searchTag, firstIndex + searchTag.length());
-                if (secondIndex != -1) {
-                    output = output.substring(0, secondIndex).trim();
+            String output = sb.toString().trim();
+            // 重複回答カットの安全な実装
+            String tag = "【明日の予報";
+            int first = output.indexOf(tag);
+            if (first != -1) {
+                int second = output.indexOf(tag, first + tag.length());
+                if (second != -1) {
+                    output = output.substring(0, second).trim();
                 }
-                return output;
-            } else {
-                return "【APIエラー】応答にテキストが含まれていません:\n" + body;
             }
+            return output.isEmpty() ? "【APIエラー】解析失敗" : output;
 
         } catch (Exception e) {
             return "【システムエラー】 " + e.getMessage();
