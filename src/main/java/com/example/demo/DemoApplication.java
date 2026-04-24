@@ -39,7 +39,6 @@ public class DemoApplication {
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // モデルのフォールバックは維持（エラー対策のため）
                 String weatherInfo = fetchWeatherWithFallback(apiKey);
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
@@ -84,24 +83,25 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithFallback(String apiKey) {
-        // 現時点で最も安定しているモデルを指定
-        String[] models = {"gemini-1.5-flash", "gemini-1.5-pro"};
+        // ★ここが原因でした！「-latest」をつけてフルネームの正式名称で呼びます
+        String[] models = {"gemini-1.5-flash-latest", "gemini-1.5-pro-latest"};
         for (String modelName : models) {
             String result = callGeminiApi(modelName, apiKey);
-            if (!result.contains("【APIエラー】")) return result;
+            if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
+                return result;
+            }
         }
-        return "【全モデル制限中】明日またお試しください。";
+        return "【全モデル制限中】AIが大行列で大忙しです。時間をあけてお試しください。";
     }
 
     private String callGeminiApi(String modelName, String apiKey) {
         try {
             java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
-            String currentTime = sdf.format(cal.getTime()); // 現在時刻（14:55頃）を取得
+            String currentTime = sdf.format(cal.getTime()); // 現在の時間を取得
 
-            // プロンプトを「14:55時点の予報」を意識するように改良
             String prompt = "現在は " + currentTime + " です。この直近の検索データに基づき、明日（本日より翌日）の東京都練馬区の天気を答えてください。" +
-                            "特に、現時点（14:55）で発表されている最新の予報を反映させてください。" +
+                            "特に、現時点（" + currentTime + "）で発表されている最新の予報を反映させてください。" +
                             "回答は以下の形式のみ、1回だけ出力してください。" +
                             "【明日の予報(練馬区)】" +
                             "・06:00: [天気] (気温/降水確率)" +
@@ -110,7 +110,7 @@ public class DemoApplication {
                             "・15:00: [天気] (気温/降水確率)" +
                             "・18:00: [天気] (気温/降水確率)" +
                             "・21:00: [天気] (気温/降水確率)" +
-                            "AIアドバイス: [14:55時点の最新情報を踏まえた指示]" +
+                            "AIアドバイス: [" + currentTime + "時点の最新情報を踏まえた指示]" +
                             "参考サイト: [URL]";
 
             String safePrompt = prompt.replace("\"", "\\\"").replace("\n", "\\n");
@@ -135,7 +135,6 @@ public class DemoApplication {
             }
 
             String output = sb.toString().trim();
-            // 重複カット
             int first = output.indexOf("【明日の予報");
             if (first != -1) {
                 int second = output.indexOf("【明日の予報", first + 7);
