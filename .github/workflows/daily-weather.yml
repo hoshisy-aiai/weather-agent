@@ -2,11 +2,11 @@ name: Daily Weather Update
 
 on:
   schedule:
-    # 毎日 日本時間 13:00（世界時間 04:00）に起動予約
-    # これで遅延しても、14時〜15時台には動き出す可能性が高まります
+    # GitHubの混雑による遅延（1〜2時間）を見越して、早めに予約！
+    # 日本時間 13:00（世界標準時 04:00）に起動するように設定しています
     - cron: '0 4 * * *'
-  workflow_dispatch:
-  
+  workflow_dispatch: # 手動実行ボタンも有効
+
 jobs:
   build:
     runs-on: ubuntu-latest
