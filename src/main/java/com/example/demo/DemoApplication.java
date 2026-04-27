@@ -33,7 +33,7 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- 超改良版AIエージェント起動 ---");
+            System.out.println("--- タイムゾーン完璧版AIエージェント起動 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
@@ -41,7 +41,6 @@ public class DemoApplication {
 
                 String weatherInfo = fetchWeatherWithBruteForce(apiKey);
 
-                // AIが全滅した場合は、カレンダーを汚さない
                 if (weatherInfo.equals("【制限中】")) {
                     System.err.println("AIが全モデルで制限中だったため、カレンダー登録をスキップしました。");
                     System.exit(0);
@@ -57,7 +56,7 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // カレンダーの予定枠を15時に設定（※GitHub Actionsの実行時間とは別です）
+                // カレンダーの予定枠を15時に設定
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
@@ -86,7 +85,7 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithBruteForce(String apiKey) {
-        // あなたの承認済みリスト
+        // 利用可能モデルリスト
         String[] models = {"gemini-2.5-flash", "gemini-2.0-flash"};
         
         for (String modelName : models) {
@@ -110,16 +109,25 @@ public class DemoApplication {
             java.util.Calendar tomorrow = (java.util.Calendar) cal.clone();
             tomorrow.add(java.util.Calendar.DAY_OF_MONTH, 1);
             
-            // 正確な日付と曜日を計算
+            // ★文字にするツール（SimpleDateFormat）すべてに「東京時間」を強制します！
+            TimeZone tzTokyo = TimeZone.getTimeZone("Asia/Tokyo");
+
+            SimpleDateFormat sdfDate = new SimpleDateFormat("M月d日");
+            sdfDate.setTimeZone(tzTokyo);
+            String tomorrowDateStr = sdfDate.format(tomorrow.getTime());
+
+            SimpleDateFormat sdfFull = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
+            sdfFull.setTimeZone(tzTokyo);
+            String currentTime = sdfFull.format(cal.getTime());
+
+            SimpleDateFormat sdfTime = new SimpleDateFormat("HH:mm");
+            sdfTime.setTimeZone(tzTokyo);
+            String promptTime = sdfTime.format(cal.getTime());
+
             String[] weekDays = {"日", "月", "火", "水", "木", "金", "土"};
-            String tomorrowDateStr = new SimpleDateFormat("M月d日").format(tomorrow.getTime());
             String tomorrowDayOfWeek = weekDays[tomorrow.get(java.util.Calendar.DAY_OF_WEEK) - 1];
             
-            // ★修正ポイント：実行時の「現在の時刻」を自動取得するように変更
-            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 HH:mm").format(cal.getTime());
-            String promptTime = new SimpleDateFormat("HH:mm").format(cal.getTime());
-
-            // プロンプトを極限まで厳しく！
+            // プロンプトを極限まで厳しく
             String prompt = "【最重要：明日の日付と曜日は " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") です。絶対に間違えないでください】\n" +
                             "現在は " + currentTime + " です。Google検索を使い、明日 " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") の東京都練馬区の天気を回答してください。\n" +
                             "以下の形式で「1回だけ」出力し、回答を絶対に繰り返さないこと。\n\n" +
@@ -154,7 +162,6 @@ public class DemoApplication {
 
             String output = sb.toString().trim();
 
-            // ★物理カット：最初の「tenki.jp」の直後で文字をすべて切り捨てる
             int cutPoint = output.indexOf("tenki.jp");
             if (cutPoint != -1) {
                 output = output.substring(0, cutPoint + 8).trim();
