@@ -2,10 +2,11 @@ name: Daily Weather Update
 
 on:
   schedule:
-    # 毎日 日本時間 14:55（世界時間 05:55）に自動起動
-    - cron: '55 5 * * *'
-  workflow_dispatch: # 手動実行ボタンも有効
-
+    # 毎日 日本時間 13:00（世界時間 04:00）に起動予約
+    # これで遅延しても、14時〜15時台には動き出す可能性が高まります
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  
 jobs:
   build:
     runs-on: ubuntu-latest
