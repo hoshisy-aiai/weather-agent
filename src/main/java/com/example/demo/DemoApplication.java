@@ -57,6 +57,7 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
+                // カレンダーの予定枠を15時に設定（※GitHub Actionsの実行時間とは別です）
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
@@ -113,13 +114,16 @@ public class DemoApplication {
             String[] weekDays = {"日", "月", "火", "水", "木", "金", "土"};
             String tomorrowDateStr = new SimpleDateFormat("M月d日").format(tomorrow.getTime());
             String tomorrowDayOfWeek = weekDays[tomorrow.get(java.util.Calendar.DAY_OF_WEEK) - 1];
-            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 14:55").format(cal.getTime());
+            
+            // ★修正ポイント：実行時の「現在の時刻」を自動取得するように変更
+            String currentTime = new SimpleDateFormat("yyyy年MM月dd日 HH:mm").format(cal.getTime());
+            String promptTime = new SimpleDateFormat("HH:mm").format(cal.getTime());
 
             // プロンプトを極限まで厳しく！
             String prompt = "【最重要：明日の日付と曜日は " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") です。絶対に間違えないでください】\n" +
                             "現在は " + currentTime + " です。Google検索を使い、明日 " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") の東京都練馬区の天気を回答してください。\n" +
                             "以下の形式で「1回だけ」出力し、回答を絶対に繰り返さないこと。\n\n" +
-                            "【明日の予報(練馬区)】【14:55時点】\n" +
+                            "【明日の予報(練馬区)】【" + promptTime + "時点】\n" +
                             "・06:00: [天気] (気温/降水確率)\n" +
                             "・09:00: [天気] (気温/降水確率)\n" +
                             "・12:00: [天気] (気温/降水確率)\n" +
