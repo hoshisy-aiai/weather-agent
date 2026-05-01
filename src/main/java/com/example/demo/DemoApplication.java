@@ -33,13 +33,19 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- 最終修正版：全文章抽出・今日15時登録 ---");
+            System.out.println("--- 原点回帰：ユーザー成功コードベース AI起動 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                String weatherInfo = fetchWeatherWithGemini(apiKey);
+                String weatherInfo = fetchWeatherWithBruteForce(apiKey);
+
+                // 全リトライ失敗、または制限中の場合はカレンダー登録しない
+                if (weatherInfo.equals("【制限中】")) {
+                    System.err.println("正しい形式の回答が得られなかったため、カレンダー登録を中止しました。");
+                    System.exit(0);
+                }
 
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
                         new ByteArrayInputStream(credentialsJson.getBytes()))
@@ -51,23 +57,28 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // 今日の15時
+                // 【修正①】確実に「今日」の「15時」に固定
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
                 targetDate.set(java.util.Calendar.SECOND, 0);
+                targetDate.set(java.util.Calendar.MILLISECOND, 0);
 
                 Event event = new Event()
                     .setSummary("🌤️ AI天気予報：明日の練馬区")
                     .setDescription(weatherInfo);
 
-                event.setStart(new EventDateTime().setDateTime(new DateTime(targetDate.getTime())).setTimeZone("Asia/Tokyo"));
+                EventDateTime start = new EventDateTime()
+                    .setDateTime(new DateTime(targetDate.getTime()))
+                    .setTimeZone("Asia/Tokyo");
+                event.setStart(start);
+
                 java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
                 endDate.add(java.util.Calendar.MINUTE, 30);
                 event.setEnd(new EventDateTime().setDateTime(new DateTime(endDate.getTime())).setTimeZone("Asia/Tokyo"));
 
                 service.events().insert(calendarId, event).execute();
-                System.out.println("--- 完了：予報データをすべて書き込みました ---");
+                System.out.println("--- 成功：カレンダーに登録しました ---");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -76,54 +87,106 @@ public class DemoApplication {
         };
     }
 
-    private String fetchWeatherWithGemini(String apiKey) throws Exception {
-        java.util.Calendar tomorrow = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
-        tomorrow.add(java.util.Calendar.DAY_OF_MONTH, 1);
-        String tomorrowStr = new SimpleDateFormat("M月d日").format(tomorrow.getTime());
-
-        String prompt = "Google検索で明日" + tomorrowStr + "の練馬区の天気を調べ、以下の形式で回答してください。\\n" +
-                        "🗓️ 【明日の予報(練馬区)】\\n" +
-                        "━━━━━━━━━━━━━━━━━━━━\\n" +
-                        "・06時: [天気・気温・降水確率]\\n" +
-                        "・09時: [天気・気温・降水確率]\\n" +
-                        "・12時: [天気・気温・降水確率]\\n" +
-                        "・15時: [天気・気温・降水確率]\\n" +
-                        "・18時: [天気・気温・降水確率]\\n" +
-                        "・21時: [天気・気温・降水確率]\\n" +
-                        "━━━━━━━━━━━━━━━━━━━━\\n" +
-                        "💡 AIアドバイス：[服装と持ち物を短く1文で]";
-
-        String requestBody = "{" +
-                "\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]" +
-                ",\"tools\":[{\"googleSearch\":{}}]" +
-                ",\"generationConfig\":{\"temperature\":0.1, \"maxOutputTokens\":1000}" +
-                "}";
-
-        java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
-        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey))
-                .header("Content-Type", "application/json")
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
-                .build();
-
-        java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+    private String fetchWeatherWithBruteForce(String apiKey) {
+        String[] models = {"gemini-2.5-flash"}; // 安定版一本化
         
-        // 【修正】JSONからテキストを抽出する正規表現をより厳密に
-        Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-        Matcher matcher = pattern.matcher(response.body());
-        
-        String longestText = "";
-        while (matcher.find()) {
-            String found = matcher.group(1)
-                .replace("\\n", "\n")
-                .replace("\\\"", "\"")
-                .replace("\\r", "");
-            // 最も長いテキストブロック（＝検索結果に基づいた回答本体）を採用
-            if (found.length() > longestText.length()) {
-                longestText = found;
+        for (String modelName : models) {
+            for (int i = 1; i <= 3; i++) {
+                System.out.println(modelName + " で試行中... (" + i + "回目)");
+                String result = callGeminiApi(modelName, apiKey);
+
+                // エラー文字が含まれていなければ「検品合格」として採用
+                if (!result.contains("【APIエラー】") && !result.contains("【システムエラー】")) {
+                    return result;
+                }
+                
+                System.out.println("回答が不完全なため、リトライします...");
+                int waitTime = (i == 1) ? 20000 : 60000; 
+                try { Thread.sleep(waitTime); } catch (InterruptedException e) {}
             }
         }
+        return "【制限中】";
+    }
 
-        return longestText.isEmpty() ? "取得エラー" : longestText.trim();
+    private String callGeminiApi(String modelName, String apiKey) {
+        try {
+            java.util.Calendar cal = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
+            java.util.Calendar tomorrow = (java.util.Calendar) cal.clone();
+            tomorrow.add(java.util.Calendar.DAY_OF_MONTH, 1);
+            
+            TimeZone tzTokyo = TimeZone.getTimeZone("Asia/Tokyo");
+
+            SimpleDateFormat sdfDate = new SimpleDateFormat("M月d日");
+            sdfDate.setTimeZone(tzTokyo);
+            String tomorrowDateStr = sdfDate.format(tomorrow.getTime());
+
+            SimpleDateFormat sdfFull = new SimpleDateFormat("yyyy年MM月dd日 HH:mm");
+            sdfFull.setTimeZone(tzTokyo);
+            String currentTime = sdfFull.format(cal.getTime());
+
+            SimpleDateFormat sdfTime = new SimpleDateFormat("HH:mm");
+            sdfTime.setTimeZone(tzTokyo);
+            String promptTime = sdfTime.format(cal.getTime());
+
+            String[] weekDays = {"日", "月", "火", "水", "木", "金", "土"};
+            String tomorrowDayOfWeek = weekDays[tomorrow.get(java.util.Calendar.DAY_OF_WEEK) - 1];
+            
+            // プロンプトは元の成功ベースに絵文字と区切り線だけ追加
+            String prompt = "【最重要：明日の日付と曜日は " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") です。絶対に間違えないでください】\n" +
+                            "現在は " + currentTime + " です。Google検索を使い、明日 " + tomorrowDateStr + "(" + tomorrowDayOfWeek + ") の東京都練馬区の天気を調べて回答してください。\n" +
+                            "データが取得できない場合でも言い訳は不要です。必ず以下の形式で「1回だけ」出力し、絶対に繰り返さないこと。\n\n" +
+                            "🗓️ 【明日の予報(練馬区)】【" + promptTime + "時点】\n" +
+                            "━━━━━━━━━━━━━━━━━━━━\n" +
+                            "・06:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "・09:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "・12:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "・15:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "・18:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "・21:00: [絵文字 天気] (気温/降水確率)\n" +
+                            "━━━━━━━━━━━━━━━━━━━━\n" +
+                            "💡 AIアドバイス: [服装のアドバイスを1文で]\n" +
+                            "🌐 参考サイト: weather.yahoo.co.jp";
+
+            String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt.replace("\n", "\\n").replace("\"", "\\\"") + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
+
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) return "【APIエラー】" + response.statusCode();
+
+            // 【修正②】途中で切れないよう安全な正規表現にし、全文を連結（元の成功ロジック復活）
+            Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            Matcher matcher = pattern.matcher(response.body());
+            StringBuilder sb = new StringBuilder();
+            while (matcher.find()) {
+                sb.append(matcher.group(1).replace("\\n", "\n").replace("\\\"", "\""));
+            }
+
+            String output = sb.toString().trim();
+
+            // ★検品：指定したタイトルが含まれているかチェック
+            if (!output.contains("【明日の予報(練馬区)】")) {
+                return "【システムエラー】フォーマットが正しくありません";
+            }
+
+            // 【修正③】あなたが考案した「フッターでカットする」素晴らしいロジックを完全復活
+            int cutPoint = output.indexOf("weather.yahoo.co.jp");
+            if (cutPoint == -1) cutPoint = output.indexOf("tenki.jp");
+            
+            if (cutPoint != -1) {
+                // "weather.yahoo.co.jp" の文字数(19)分を足して、後ろの不要データを切り落とす
+                output = output.substring(0, Math.min(output.length(), cutPoint + 19)).trim();
+            }
+            
+            return output;
+
+        } catch (Exception e) {
+            return "【システムエラー】通信に失敗しました";
+        }
     }
 }
