@@ -38,16 +38,14 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- 2026/05/01版 Gemini 2.5 Flash 起動 ---");
+            System.out.println("--- 2026/05/01 安定版 Gemini 2.5 Flash で再挑戦 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
                 String credentialsJson = System.getenv("GOOGLE_CREDENTIALS");
 
-                // 2.5 Flash で天気情報を取得
                 String weatherInfo = fetchWeatherWithGemini(apiKey);
 
-                // Googleカレンダーの準備
                 GoogleCredentials credentials = GoogleCredentials.fromStream(
                         new ByteArrayInputStream(credentialsJson.getBytes()))
                         .createScoped(Collections.singleton(CalendarScopes.CALENDAR));
@@ -58,15 +56,15 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // 明日の15時にセット
+                // 明日の日付
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1);
-                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
+                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 7); // 朝7時にセットして1日を確認しやすく
                 targetDate.set(java.util.Calendar.MINUTE, 0);
 
-                String title = "AI天気予報(2.5 Flash版)：練馬区";
+                String title = "練馬区の天気予報";
                 if (weatherInfo.contains("☔")) title += " ☔";
-                else if (weatherInfo.contains("☀️")) title += " ☀️";
+                else if (weatherInfo.contains("☀️") || weatherInfo.contains("晴")) title += " ☀️";
 
                 Event event = new Event()
                     .setSummary(title)
@@ -74,14 +72,13 @@ public class DemoApplication {
 
                 event.setStart(new EventDateTime().setDateTime(new DateTime(targetDate.getTime())).setTimeZone("Asia/Tokyo"));
                 java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
-                endDate.add(java.util.Calendar.MINUTE, 30);
+                endDate.add(java.util.Calendar.HOUR, 1); // 1時間の枠を確保
                 event.setEnd(new EventDateTime().setDateTime(new DateTime(endDate.getTime())).setTimeZone("Asia/Tokyo"));
 
                 service.events().insert(calendarId, event).execute();
-                System.out.println("--- 成功：カレンダーに登録完了 ---");
+                System.out.println("--- 完璧！カレンダーに書き込みました ---");
 
             } catch (Exception e) {
-                System.err.println("❌ 実行エラー: " + e.getMessage());
                 e.printStackTrace();
             }
             System.exit(0);
@@ -89,7 +86,6 @@ public class DemoApplication {
     }
 
     private String fetchWeatherWithGemini(String apiKey) throws Exception {
-        // 調査済み安定モデル名
         String modelName = "gemini-2.5-flash"; 
         
         java.util.Calendar tomorrow = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
@@ -98,17 +94,19 @@ public class DemoApplication {
         sdf.setTimeZone(TimeZone.getTimeZone("Asia/Tokyo"));
         String dateStr = sdf.format(tomorrow.getTime());
 
-        String prompt = "Google検索を使って、" + dateStr + "の東京都練馬区の天気を調べてください。\\n" +
-                        "その後、以下の形式で回答してください。\\n" +
-                        "【明日の予報(練馬区)】\\n" +
-                        "━━━━━━━━━━━━━━━━━━━━\\n" +
-                        "・06,09,12,15,18,21時の天気・気温・降水確率（絵文字多めで！）\\n" +
-                        "━━━━━━━━━━━━━━━━━━━━\\n" +
-                        "💡 AIアドバイス\\n" +
-                        "[服装や持ち物の親切なアドバイス]\\n" +
-                        "━━━━━━━━━━━━━━━━━━━━";
+        // プロンプト自体が回答に混ざらないよう「出力内容のみを返せ」と念押し
+        String prompt = "Google検索を使用して、" + dateStr + "の東京都練馬区の天気を調べてください。\\n" +
+                        "以下のルールを厳守し、結果のみを出力してください。私の指示文は含めないでください。\\n" +
+                        "1. 06,09,12,15,18,21時の天気・気温・降水確率を絵文字付きで1行ずつ書く。\\n" +
+                        "2. 💡 AIアドバイス として、服装と持ち物を合計2文以内で簡潔に書く。\\n" +
+                        "3. 余計な挨拶や解説は一切不要。";
 
-        String requestBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}],\"tools\":[{\"googleSearch\":{}}]}";
+        // 回答がループしないよう generationConfig で制御
+        String requestBody = "{" +
+                "\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]" +
+                ",\"tools\":[{\"googleSearch\":{}}]" +
+                ",\"generationConfig\":{\"temperature\":0.2, \"maxOutputTokens\":500}" +
+                "}";
 
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).build();
         HttpRequest request = HttpRequest.newBuilder()
@@ -119,7 +117,6 @@ public class DemoApplication {
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         
-        // 正規表現でテキスト抽出
         Pattern pattern = Pattern.compile("\"text\"\\s*:\\s*\"(.+?)\"");
         Matcher matcher = pattern.matcher(response.body());
         StringBuilder sb = new StringBuilder();
@@ -127,7 +124,6 @@ public class DemoApplication {
             sb.append(matcher.group(1).replace("\\n", "\n").replace("\\\"", "\""));
         }
 
-        String result = sb.toString().trim();
-        return result.isEmpty() ? "天気情報の取得に失敗しました。" : result;
+        return sb.toString().trim();
     }
 }
