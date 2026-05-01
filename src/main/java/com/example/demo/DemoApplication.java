@@ -38,7 +38,7 @@ public class DemoApplication {
     @Bean
     public CommandLineRunner runWeatherTask() {
         return args -> {
-            System.out.println("--- 2026/05/01 安定版 Gemini 2.5 Flash で再挑戦 ---");
+            System.out.println("--- 2026/05/01 安定版 Gemini 2.5 Flash / 15時固定設定 ---");
             try {
                 String apiKey = System.getenv("GEMINI_API_KEY");
                 String calendarId = System.getenv("CALENDAR_ID");
@@ -56,13 +56,14 @@ public class DemoApplication {
                         .setApplicationName("Weather Agent")
                         .build();
 
-                // 明日の日付
+                // 明日の15時に正確にセット
                 java.util.Calendar targetDate = java.util.Calendar.getInstance(TimeZone.getTimeZone("Asia/Tokyo"));
                 targetDate.add(java.util.Calendar.DAY_OF_MONTH, 1);
-                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 7); // 朝7時にセットして1日を確認しやすく
+                targetDate.set(java.util.Calendar.HOUR_OF_DAY, 15);
                 targetDate.set(java.util.Calendar.MINUTE, 0);
+                targetDate.set(java.util.Calendar.SECOND, 0);
 
-                String title = "練馬区の天気予報";
+                String title = "AI天気予報：練馬区";
                 if (weatherInfo.contains("☔")) title += " ☔";
                 else if (weatherInfo.contains("☀️") || weatherInfo.contains("晴")) title += " ☀️";
 
@@ -72,11 +73,11 @@ public class DemoApplication {
 
                 event.setStart(new EventDateTime().setDateTime(new DateTime(targetDate.getTime())).setTimeZone("Asia/Tokyo"));
                 java.util.Calendar endDate = (java.util.Calendar) targetDate.clone();
-                endDate.add(java.util.Calendar.HOUR, 1); // 1時間の枠を確保
+                endDate.add(java.util.Calendar.MINUTE, 30); // 30分枠
                 event.setEnd(new EventDateTime().setDateTime(new DateTime(endDate.getTime())).setTimeZone("Asia/Tokyo"));
 
                 service.events().insert(calendarId, event).execute();
-                System.out.println("--- 完璧！カレンダーに書き込みました ---");
+                System.out.println("--- 完了：15時の枠に登録しました ---");
 
             } catch (Exception e) {
                 e.printStackTrace();
@@ -94,18 +95,17 @@ public class DemoApplication {
         sdf.setTimeZone(TimeZone.getTimeZone("Asia/Tokyo"));
         String dateStr = sdf.format(tomorrow.getTime());
 
-        // プロンプト自体が回答に混ざらないよう「出力内容のみを返せ」と念押し
+        // 出力形式を徹底させるためのプロンプト修正
         String prompt = "Google検索を使用して、" + dateStr + "の東京都練馬区の天気を調べてください。\\n" +
-                        "以下のルールを厳守し、結果のみを出力してください。私の指示文は含めないでください。\\n" +
-                        "1. 06,09,12,15,18,21時の天気・気温・降水確率を絵文字付きで1行ずつ書く。\\n" +
-                        "2. 💡 AIアドバイス として、服装と持ち物を合計2文以内で簡潔に書く。\\n" +
-                        "3. 余計な挨拶や解説は一切不要。";
+                        "以下のルールを厳守し、結果のみを回答してください。\\n" +
+                        "1. 06,09,12,15,18,21時の天気・気温・降水確率を1行ずつ簡潔に列挙する。\\n" +
+                        "2. 💡 AIアドバイス として、服装や持ち物への助言を短く1〜2文で添える。\\n" +
+                        "3. 「・06,09,12...」といった私の指示文や、余計な解説、挨拶は絶対に含めない。";
 
-        // 回答がループしないよう generationConfig で制御
         String requestBody = "{" +
                 "\"contents\":[{\"parts\":[{\"text\":\"" + prompt + "\"}]}]" +
                 ",\"tools\":[{\"googleSearch\":{}}]" +
-                ",\"generationConfig\":{\"temperature\":0.2, \"maxOutputTokens\":500}" +
+                ",\"generationConfig\":{\"temperature\":0.1, \"maxOutputTokens\":400}" +
                 "}";
 
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).build();
